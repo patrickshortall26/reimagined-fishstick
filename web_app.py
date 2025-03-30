@@ -129,7 +129,7 @@ if uploaded_file:
         "Blue": "#0000FF",
         "Pink": "#FFC0CB",
         "Black": "#000000",
-        "Baulk": "#A9A9A9"
+        "Baulk": "#7FFFD4"  # Changed from grey to Aquamarine
     }
 
     st.markdown("### Player Comparison")
@@ -146,11 +146,17 @@ if uploaded_file:
         chart_data["Label"] = chart_data["Percentage Diff"].apply(lambda x: f"{x:+.1f}%")
         chart_data["Label Color"] = chart_data["Percentage Diff"].apply(lambda x: "green" if x >= 0 else "red")
 
+        # Conditional color logic
+        chart_data["Bar Color"] = chart_data.apply(
+            lambda row: "#D3D3D3" if row["Percentage Diff"] < 0 else color_mapping.get(row["Ball"], "#000000"),
+            axis=1
+        )
+
         base = alt.Chart(chart_data).encode(x=alt.X("Ball", sort=None))
 
         bars = base.mark_bar().encode(
             y="Average Proportion",
-            color=alt.Color("Ball", scale=alt.Scale(domain=list(color_mapping.keys()), range=list(color_mapping.values())), legend=None),
+            color=alt.Color("Bar Color:N", scale=None, legend=None),
             tooltip=["Ball", "Average Proportion", "Threshold", "Label"]
         )
 
