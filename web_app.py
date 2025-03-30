@@ -30,15 +30,32 @@ if uploaded_file:
     # Convert date
     game_df["Date"] = pd.to_datetime(game_df["Date"], format="%Y%m%d")
 
+    # Default threshold values
+    threshold_values = {
+        "Yellow": 0.111,
+        "Green": 0.118,
+        "Brown": 0.105,
+        "Blue": 0.308,
+        "Pink": 0.118,
+        "Black": 0.357,
+        "Baulk": 0.318
+    }
+
     # Sidebar filters
     st.sidebar.header("Filter Data")
 
-    # Move minimum threshold sliders above tournament selector
+    # Minimum threshold sliders
     st.sidebar.markdown("### Minimum Value Thresholds")
     color_list = ["Yellow", "Green", "Brown", "Blue", "Pink", "Black", "Baulk"]
     min_thresholds = {}
     for color in color_list:
-        min_thresholds[color] = st.sidebar.slider(f"{color}", min_value=0.0, max_value=1.0, value=0.0, step=0.01)
+        min_thresholds[color] = st.sidebar.slider(
+            f"{color}",
+            min_value=0.0,
+            max_value=1.0,
+            value=threshold_values.get(color, 0.0),
+            step=0.01
+        )
 
     tournaments = st.sidebar.multiselect("Select Tournaments", options=game_df["Tournament"].unique(), default=game_df["Tournament"].unique())
 
@@ -119,23 +136,37 @@ if uploaded_file:
     col_plot1, col_plot2 = st.columns(2)
 
     def create_chart(data, player_name, game_count):
-        base = alt.Chart(data).encode(x=alt.X("Ball", sort=None))
+        # Merge with threshold data
+        thresholds_df = pd.DataFrame({
+            "Ball": list(min_thresholds.keys()),
+            "Threshold": list(min_thresholds.values())
+        })
+
+        chart_data = data.merge(thresholds_df, on="Ball")
+        chart_data["Percentage Diff"] = ((chart_data["Average Proportion"] - chart_data["Threshold"]) / chart_data["Threshold"]) * 100
+        chart_data["Label"] = chart_data["Percentage Diff"].apply(lambda x: f"{x:+.1f}%")
+        chart_data["Label Color"] = chart_data["Percentage Diff"].apply(lambda x: "green" if x >= 0 else "red")
+
+        base = alt.Chart(chart_data).encode(x=alt.X("Ball", sort=None))
+
         bars = base.mark_bar().encode(
             y="Average Proportion",
             color=alt.Color("Ball", scale=alt.Scale(domain=list(color_mapping.keys()), range=list(color_mapping.values())), legend=None),
-            tooltip=["Ball", "Average Proportion"]
+            tooltip=["Ball", "Average Proportion", "Threshold", "Label"]
         )
 
-        # Draw threshold lines
-        rules = alt.Chart(pd.DataFrame({
-            "Ball": list(min_thresholds.keys()),
-            "Threshold": list(min_thresholds.values())
-        })).mark_rule(color="red", strokeDash=[4, 2]).encode(
+        rules = alt.Chart(chart_data).mark_rule(color="red", strokeDash=[4, 2]).encode(
             x="Ball",
             y="Threshold"
         )
 
-        return (bars + rules).properties(title=f"{player_name} ({game_count} games)", width=300, height=400)
+        labels = base.mark_text(dy=-10, fontSize=13).encode(
+            y="Average Proportion",
+            text="Label",
+            color=alt.Color("Label Color", scale=None)
+        )
+
+        return (bars + rules + labels).properties(title=f"{player_name} ({game_count} games)", width=300, height=400)
 
     with col_plot1:
         st.altair_chart(create_chart(stats_a, player_a, games_a), use_container_width=True)
