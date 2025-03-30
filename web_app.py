@@ -44,7 +44,6 @@ if uploaded_file:
     # Sidebar filters
     st.sidebar.header("Filter Data")
 
-    # Minimum threshold sliders
     st.sidebar.markdown("### Minimum Value Thresholds")
     color_list = ["Yellow", "Green", "Brown", "Blue", "Pink", "Black", "Baulk"]
     min_thresholds = {}
@@ -59,7 +58,7 @@ if uploaded_file:
 
     tournaments = st.sidebar.multiselect("Select Tournaments", options=game_df["Tournament"].unique(), default=game_df["Tournament"].unique())
 
-    # Player and time selection in main layout
+    # Player and time selection
     player_list = sorted(set(game_df["Player 1 Name"].dropna()).union(game_df["Player 2 Name"].dropna()))
     col1, col_date, col_toggle, col2 = st.columns([1.5, 2, 1, 1.5])
 
@@ -107,7 +106,7 @@ if uploaded_file:
             player_games[col] = player_games[col] * player_games["Total Frames"]
 
         weighted_sums = player_games[color_cols].sum()
-        total_frames = player_games["Total Frames"].sum()
+        total_frames = int(player_games["Total Frames"].sum())
 
         if total_frames > 0:
             weighted_avgs = weighted_sums / total_frames
@@ -117,10 +116,11 @@ if uploaded_file:
         avg_colors = weighted_avgs.reset_index()
         avg_colors.columns = ["Ball", "Average Proportion"]
         num_games = len(player_games)
-        return avg_colors, num_games
 
-    stats_a, games_a = get_player_stats(filtered_df, player_a)
-    stats_b, games_b = get_player_stats(filtered_df, player_b)
+        return avg_colors, num_games, total_frames
+
+    stats_a, games_a, frames_a = get_player_stats(filtered_df, player_a)
+    stats_b, games_b, frames_b = get_player_stats(filtered_df, player_b)
 
     color_mapping = {
         "Yellow": "#FFFF00",
@@ -135,8 +135,7 @@ if uploaded_file:
     st.markdown("### Player Comparison")
     col_plot1, col_plot2 = st.columns(2)
 
-    def create_chart(data, player_name, game_count):
-        # Merge with threshold data
+    def create_chart(data, player_name, game_count, frame_count):
         thresholds_df = pd.DataFrame({
             "Ball": list(min_thresholds.keys()),
             "Threshold": list(min_thresholds.values())
@@ -166,13 +165,17 @@ if uploaded_file:
             color=alt.Color("Label Color", scale=None)
         )
 
-        return (bars + rules + labels).properties(title=f"{player_name} ({game_count} games)", width=300, height=400)
+        return (bars + rules + labels).properties(
+            title=f"{player_name} ({game_count} games / {frame_count} frames)",
+            width=300,
+            height=400
+        )
 
     with col_plot1:
-        st.altair_chart(create_chart(stats_a, player_a, games_a), use_container_width=True)
+        st.altair_chart(create_chart(stats_a, player_a, games_a, frames_a), use_container_width=True)
 
     with col_plot2:
-        st.altair_chart(create_chart(stats_b, player_b, games_b), use_container_width=True)
+        st.altair_chart(create_chart(stats_b, player_b, games_b, frames_b), use_container_width=True)
 
     st.divider()
     st.file_uploader("Upload a new Excel file", type=["xlsx"], key="new_upload")
