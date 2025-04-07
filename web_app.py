@@ -2,6 +2,9 @@ import streamlit as st
 import pandas as pd
 import altair as alt
 from datetime import datetime, timedelta
+import requests
+from bs4 import BeautifulSoup
+from fuzzywuzzy import process
 
 st.set_page_config(page_title="Snooker Game Visualizer", layout="wide")
 st.title("Snooker Game Data Visualization")
@@ -119,9 +122,6 @@ if uploaded_file:
 
         return avg_colors, num_games, total_frames
 
-    stats_a, games_a, frames_a = get_player_stats(filtered_df, player_a)
-    stats_b, games_b, frames_b = get_player_stats(filtered_df, player_b)
-
     color_mapping = {
         "Yellow": "#FFFF00",
         "Green": "#008000",
@@ -129,11 +129,8 @@ if uploaded_file:
         "Blue": "#0000FF",
         "Pink": "#FFC0CB",
         "Black": "#000000",
-        "Baulk": "#7FFFD4"  # Changed from grey to Aquamarine
+        "Baulk": "#7FFFD4"
     }
-
-    st.markdown("### Player Comparison")
-    col_plot1, col_plot2 = st.columns(2)
 
     def create_chart(data, player_name, game_count, frame_count):
         thresholds_df = pd.DataFrame({
@@ -145,8 +142,6 @@ if uploaded_file:
         chart_data["Percentage Diff"] = ((chart_data["Average Proportion"] - chart_data["Threshold"]) / chart_data["Threshold"]) * 100
         chart_data["Label"] = chart_data["Percentage Diff"].apply(lambda x: f"{x:+.1f}%")
         chart_data["Label Color"] = chart_data["Percentage Diff"].apply(lambda x: "green" if x >= 0 else "red")
-
-        # Conditional color logic
         chart_data["Bar Color"] = chart_data.apply(
             lambda row: "#D3D3D3" if row["Percentage Diff"] < 0 else color_mapping.get(row["Ball"], "#000000"),
             axis=1
@@ -177,11 +172,92 @@ if uploaded_file:
             height=400
         )
 
-    with col_plot1:
-        st.altair_chart(create_chart(stats_a, player_a, games_a, frames_a), use_container_width=True)
+    # Fuzzy matching utility
+    def fuzzy_match_name(name, name_list, threshold=80):
+        match, score = process.extractOne(name, name_list)
+        return match if score >= threshold else None
 
-    with col_plot2:
-        st.altair_chart(create_chart(stats_b, player_b, games_b, frames_b), use_container_width=True)
+    # Fetch tournament list from snooker.org
+    def fetch_tournament_list():
+        url = "https://www.snooker.org/res/index.asp?template=2"
+        response = requests.get(url)
+        soup = BeautifulSoup(response.content, "html.parser")
+
+        tournaments = []
+        rows = soup.find_all("tr", class_="gradeA")
+
+        for row in rows:
+            name_cell = row.find("td", class_="name")
+            date_cell = row.find("td", class_="date")
+            if name_cell and name_cell.a:
+                event_name = name_cell.a.text.strip()
+                event_id = name_cell.a["href"].split("event=")[-1]
+                event_date = date_cell.text.strip() if date_cell else ""
+                tournaments.append({
+                    "label": f"{event_name} ({event_date})",
+                    "id": event_id
+                })
+        return tournaments
+
+    # Scrape matchups for selected tournament
+    def get_upcoming_matchups_from_event(event_id):
+        url = f"https://www.snooker.org/res/index.asp?event={event_id}"
+        try:
+            response = requests.get(url)
+            soup = BeautifulSoup(response.content, 'html.parser')
+            matchups = []
+
+            for row in soup.find_all("tr", class_="oneonone"):
+                players = row.find_all("td", class_="player")
+                if len(players) >= 2:
+                    p1_tag = players[0].find("a")
+                    p2_tag = players[1].find("a")
+                    if p1_tag and p2_tag:
+                        player1 = p1_tag["title"].split(",")[0].strip()
+                        player2 = p2_tag["title"].split(",")[0].strip()
+                        matchups.append((player1, player2))
+            return matchups
+        except Exception as e:
+            st.error(f"Error scraping matchups: {e}")
+            return []
+
+    # Sidebar: Select Tournament from Snooker.org
+    st.sidebar.markdown("## 🏆 Select a Tournament")
+    tournaments = fetch_tournament_list()
+
+    if tournaments:
+        selected_label = st.sidebar.selectbox(
+            "Choose a tournament to analyze",
+            [t["label"] for t in tournaments]
+        )
+        selected_event = next(t["id"] for t in tournaments if t["label"] == selected_label)
+
+        st.sidebar.markdown("### 🔍 Analyze Matchups")
+        if st.sidebar.button("Fetch Matchups"):
+            matchups = get_upcoming_matchups_from_event(selected_event)
+
+            if matchups:
+                st.markdown("## 📊 Upcoming Matchup Analysis")
+                for p1, p2 in matchups:
+                    match_p1 = fuzzy_match_name(p1, player_list)
+                    match_p2 = fuzzy_match_name(p2, player_list)
+
+                    if match_p1 and match_p2:
+                        stats_a, games_a, frames_a = get_player_stats(filtered_df, match_p1)
+                        stats_b, games_b, frames_b = get_player_stats(filtered_df, match_p2)
+
+                        st.markdown(f"### {match_p1} vs {match_p2}")
+                        col_m1, col_m2 = st.columns(2)
+                        with col_m1:
+                            st.altair_chart(create_chart(stats_a, match_p1, games_a, frames_a), use_container_width=True)
+                        with col_m2:
+                            st.altair_chart(create_chart(stats_b, match_p2, games_b, frames_b), use_container_width=True)
+                    else:
+                        st.warning(f"Could not confidently match: {p1} vs {p2}")
+            else:
+                st.info("No matchups found for this event.")
+    else:
+        st.sidebar.warning("Could not load tournament list.")
 
     st.divider()
     st.file_uploader("Upload a new Excel file", type=["xlsx"], key="new_upload")
