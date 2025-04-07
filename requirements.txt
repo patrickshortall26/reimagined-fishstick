@@ -4,3 +4,4 @@ altair
 openpyxl
 bs4
 requests
+fuzzywuzzy
