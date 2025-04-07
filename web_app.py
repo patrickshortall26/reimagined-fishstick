@@ -172,12 +172,10 @@ if uploaded_file:
             height=400
         )
 
-    # Fuzzy matching utility
     def fuzzy_match_name(name, name_list, threshold=80):
         match, score = process.extractOne(name, name_list)
         return match if score >= threshold else None
 
-    # Fetch tournament list from snooker.org
     def fetch_tournament_list():
         url = "https://www.snooker.org/res/index.asp?template=2"
         response = requests.get(url)
@@ -199,8 +197,7 @@ if uploaded_file:
                 })
         return tournaments
 
-    # Scrape matchups for selected tournament
-    def get_upcoming_matchups_from_event(event_id):
+    def get_upcoming_matchups_from_event(event_id, selected_round=None):
         url = f"https://www.snooker.org/res/index.asp?event={event_id}"
         try:
             response = requests.get(url)
@@ -208,6 +205,10 @@ if uploaded_file:
             matchups = []
 
             for row in soup.find_all("tr", class_="oneonone"):
+                round_class = next((cls for cls in row.get("class", []) if cls.startswith("round")), None)
+                if selected_round and round_class != selected_round:
+                    continue
+
                 players = row.find_all("td", class_="player")
                 if len(players) >= 2:
                     p1_tag = players[0].find("a")
@@ -221,7 +222,6 @@ if uploaded_file:
             st.error(f"Error scraping matchups: {e}")
             return []
 
-    # Sidebar: Select Tournament from Snooker.org
     st.sidebar.markdown("## 🏆 Select a Tournament")
     tournaments = fetch_tournament_list()
 
@@ -232,9 +232,13 @@ if uploaded_file:
         )
         selected_event = next(t["id"] for t in tournaments if t["label"] == selected_label)
 
+        round_options = [f"round{i}" for i in range(1, 11)]
+        selected_round = st.sidebar.selectbox("Select Round (optional)", ["All"] + round_options)
+        selected_round = None if selected_round == "All" else selected_round
+
         st.sidebar.markdown("### 🔍 Analyze Matchups")
         if st.sidebar.button("Fetch Matchups"):
-            matchups = get_upcoming_matchups_from_event(selected_event)
+            matchups = get_upcoming_matchups_from_event(selected_event, selected_round)
 
             if matchups:
                 st.markdown("## 📊 Upcoming Matchup Analysis")
