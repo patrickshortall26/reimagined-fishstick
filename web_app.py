@@ -9,7 +9,6 @@ from fuzzywuzzy import process
 st.set_page_config(page_title="Snooker Game Visualizer", layout="wide")
 st.title("Snooker Game Data Visualization")
 
-# Session state for file upload
 if 'uploaded_file' not in st.session_state:
     st.session_state.uploaded_file = None
 
@@ -25,12 +24,9 @@ if uploaded_file:
     game_df = pd.read_excel(excel, sheet_name="Game view")
     player_keys_df = pd.read_excel(excel, sheet_name="PlayerKeys")
 
-    # Merge player names
     id_to_name = player_keys_df.set_index("ID")["Name"].to_dict()
     game_df["Player 1 Name"] = game_df["Player 1"].map(id_to_name)
     game_df["Player 2 Name"] = game_df["Player 2"].map(id_to_name)
-
-    # Convert date
     game_df["Date"] = pd.to_datetime(game_df["Date"], format="%Y%m%d")
 
     threshold_values = {
@@ -48,14 +44,9 @@ if uploaded_file:
     st.sidebar.header("Minimum Value Thresholds")
     for color in color_list:
         min_thresholds[color] = st.sidebar.slider(
-            f"{color}",
-            min_value=0.0,
-            max_value=1.0,
-            value=threshold_values.get(color, 0.0),
-            step=0.01
+            f"{color}", 0.0, 1.0, threshold_values.get(color, 0.0), 0.01
         )
 
-    # Player and time selection
     player_list = sorted(set(game_df["Player 1 Name"].dropna()).union(game_df["Player 2 Name"].dropna()))
     col1, col_date, col_toggle, col2 = st.columns([1.5, 2, 1, 1.5])
 
@@ -84,68 +75,45 @@ if uploaded_file:
             date_range = st.date_input("Select Date Range", [game_df["Date"].min(), game_df["Date"].max()], key="date_range")
             start_date, end_date = pd.to_datetime(date_range[0]), pd.to_datetime(date_range[1])
 
-    filtered_df = game_df[
-        (game_df["Date"] >= start_date) &
-        (game_df["Date"] <= end_date)
-    ]
+    filtered_df = game_df[(game_df["Date"] >= start_date) & (game_df["Date"] <= end_date)]
 
     def get_player_stats(df, player_name):
         player_games = df[(df["Player 1 Name"] == player_name) | (df["Player 2 Name"] == player_name)].copy()
-        color_cols = color_list
-
         player_games["Total Frames"] = pd.to_numeric(player_games["Total Frames"], errors='coerce').fillna(0)
-        for col in color_cols:
+        for col in color_list:
             player_games[col] = pd.to_numeric(player_games[col], errors='coerce').fillna(0)
             player_games[col] *= player_games["Total Frames"]
-
-        weighted_sums = player_games[color_cols].sum()
+        weighted_sums = player_games[color_list].sum()
         total_frames = int(player_games["Total Frames"].sum())
-
-        if total_frames > 0:
-            weighted_avgs = weighted_sums / total_frames
-        else:
-            weighted_avgs = pd.Series([0]*len(color_cols), index=color_cols)
-
+        weighted_avgs = weighted_sums / total_frames if total_frames > 0 else pd.Series([0]*len(color_list), index=color_list)
         avg_colors = weighted_avgs.reset_index()
         avg_colors.columns = ["Ball", "Average Proportion"]
-        num_games = len(player_games)
-
-        return avg_colors, num_games, total_frames
+        return avg_colors, len(player_games), total_frames
 
     def create_chart(data, player_name, game_count, frame_count):
+        color_mapping = {
+            "Yellow": "#FFFF00",
+            "Green": "#008000",
+            "Brown": "#8B4513",
+            "Blue": "#0000FF",
+            "Pink": "#FFC0CB",
+            "Black": "#000000",
+            "Baulk": "#7FFFD4"
+        }
         thresholds_df = pd.DataFrame({"Ball": list(min_thresholds.keys()), "Threshold": list(min_thresholds.values())})
         chart_data = data.merge(thresholds_df, on="Ball")
         chart_data["Percentage Diff"] = ((chart_data["Average Proportion"] - chart_data["Threshold"]) / chart_data["Threshold"]) * 100
         chart_data["Label"] = chart_data["Percentage Diff"].apply(lambda x: f"{x:+.1f}%")
         chart_data["Label Color"] = chart_data["Percentage Diff"].apply(lambda x: "green" if x >= 0 else "red")
         chart_data["Bar Color"] = chart_data.apply(
-            lambda row: "#D3D3D3" if row["Percentage Diff"] < 0 else color_mapping.get(row["Ball"], "#000000"), axis=1
-        )
+            lambda row: "#D3D3D3" if row["Percentage Diff"] < 0 else color_mapping.get(row["Ball"], "#000000"), axis=1)
 
         base = alt.Chart(chart_data).encode(x=alt.X("Ball", sort=None))
+        bars = base.mark_bar().encode(y="Average Proportion", color=alt.Color("Bar Color:N", scale=None, legend=None), tooltip=["Ball", "Average Proportion", "Threshold", "Label"])
+        rules = alt.Chart(chart_data).mark_rule(color="red", strokeDash=[4, 2]).encode(x="Ball", y="Threshold")
+        labels = base.mark_text(dy=-10, fontSize=13).encode(y="Average Proportion", text="Label", color=alt.Color("Label Color", scale=None))
 
-        bars = base.mark_bar().encode(
-            y="Average Proportion",
-            color=alt.Color("Bar Color:N", scale=None, legend=None),
-            tooltip=["Ball", "Average Proportion", "Threshold", "Label"]
-        )
-
-        rules = alt.Chart(chart_data).mark_rule(color="red", strokeDash=[4, 2]).encode(
-            x="Ball",
-            y="Threshold"
-        )
-
-        labels = base.mark_text(dy=-10, fontSize=13).encode(
-            y="Average Proportion",
-            text="Label",
-            color=alt.Color("Label Color", scale=None)
-        )
-
-        return (bars + rules + labels).properties(
-            title=f"{player_name} ({game_count} games / {frame_count} frames)",
-            width=300,
-            height=400
-        )
+        return (bars + rules + labels).properties(title=f"{player_name} ({game_count} games / {frame_count} frames)", width=300, height=400)
 
     def fuzzy_match_name(name, name_list, threshold=80):
         match, score = process.extractOne(name, name_list)
@@ -194,10 +162,7 @@ if uploaded_file:
     tournaments = fetch_tournament_list()
 
     if tournaments:
-        selected_label = st.sidebar.selectbox(
-            "Choose a tournament to analyze",
-            [t["label"] for t in tournaments]
-        )
+        selected_label = st.sidebar.selectbox("Choose a tournament to analyze", [t["label"] for t in tournaments])
         selected_event = next(t["id"] for t in tournaments if t["label"] == selected_label)
         round_options = [f"round{i}" for i in range(1, 11)]
         selected_round = st.sidebar.selectbox("Select Round (optional)", ["All"] + round_options)
