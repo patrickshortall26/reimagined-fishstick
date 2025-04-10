@@ -11,6 +11,8 @@ st.title("Snooker Game Data Visualization")
 
 if 'uploaded_file' not in st.session_state:
     st.session_state.uploaded_file = None
+if 'matchup_results' not in st.session_state:
+    st.session_state.matchup_results = None
 
 if st.session_state.uploaded_file:
     uploaded_file = st.session_state.uploaded_file
@@ -183,7 +185,7 @@ if uploaded_file:
         if st.sidebar.button("Fetch Matchups"):
             one_year_df = game_df[(game_df["Date"] >= datetime.today() - timedelta(days=365))]
             matchups = get_upcoming_matchups_from_event(selected_event, selected_round)
-            shown = False
+            results = []
             for p1, p2 in matchups:
                 match_p1 = fuzzy_match_name(p1, player_list)
                 match_p2 = fuzzy_match_name(p2, player_list)
@@ -197,12 +199,14 @@ if uploaded_file:
                     b_bias = merged_b[merged_b["Average Proportion"] > merged_b["Threshold"]]["Ball"]
                     common_positive = set(a_bias).intersection(set(b_bias))
                     if common_positive:
-                        st.write(f"**{match_p1} vs {match_p2}** - Positive bias on: {', '.join(common_positive)}")
-                        shown = True
-            if not shown:
-                st.info("No matchups with both players showing positive bias on any color.")
+                        results.append(f"**{match_p1} vs {match_p2}** - Positive bias on: {', '.join(common_positive)}")
+            st.session_state.matchup_results = results
+
+    if st.session_state.matchup_results:
+        for line in st.session_state.matchup_results:
+            st.write(line)
     else:
-        st.sidebar.warning("Could not load tournament list.")
+        st.info("No matchups with both players showing positive bias on any color.")
 
     st.divider()
     st.file_uploader("Upload a new Excel file", type=["xlsx"], key="new_upload")
