@@ -158,6 +158,17 @@ if uploaded_file:
             st.error(f"Error scraping matchups: {e}")
             return []
 
+    stats_a, games_a, frames_a = get_player_stats(filtered_df, player_a)
+    stats_b, games_b, frames_b = get_player_stats(filtered_df, player_b)
+    col_v1, col_v2 = st.columns(2)
+    with col_v1:
+        st.altair_chart(create_chart(stats_a, player_a, games_a, frames_a), use_container_width=True)
+    with col_v2:
+        st.altair_chart(create_chart(stats_b, player_b, games_b, frames_b), use_container_width=True)
+
+    st.divider()
+    st.markdown("## ✅ Matchups with Positive Bias (Both Players)")
+
     st.sidebar.markdown("## 🏆 Select a Tournament")
     tournaments = fetch_tournament_list()
 
@@ -172,7 +183,6 @@ if uploaded_file:
         if st.sidebar.button("Fetch Matchups"):
             one_year_df = game_df[(game_df["Date"] >= datetime.today() - timedelta(days=365))]
             matchups = get_upcoming_matchups_from_event(selected_event, selected_round)
-            st.markdown("## ✅ Matchups with Positive Bias (Both Players)")
             shown = False
             for p1, p2 in matchups:
                 match_p1 = fuzzy_match_name(p1, player_list)
@@ -195,10 +205,6 @@ if uploaded_file:
         st.sidebar.warning("Could not load tournament list.")
 
     st.divider()
-    st.markdown("## 🔍 Individual Player Chart")
-    selected_player = st.selectbox("Choose a player to visualize", [player_a, player_b])
-    stats, games, frames = get_player_stats(filtered_df, selected_player)
-    st.altair_chart(create_chart(stats, selected_player, games, frames), use_container_width=True)
     st.file_uploader("Upload a new Excel file", type=["xlsx"], key="new_upload")
 else:
     uploaded_file = st.file_uploader("Upload the Excel file", type=["xlsx"], key="initial_upload")
