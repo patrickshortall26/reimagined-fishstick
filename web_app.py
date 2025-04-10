@@ -33,7 +33,6 @@ if uploaded_file:
     # Convert date
     game_df["Date"] = pd.to_datetime(game_df["Date"], format="%Y%m%d")
 
-    # Default threshold values
     threshold_values = {
         "Yellow": 0.111,
         "Green": 0.118,
@@ -44,12 +43,9 @@ if uploaded_file:
         "Baulk": 0.318
     }
 
-    # Sidebar filters
-    st.sidebar.header("Filter Data")
-
-    st.sidebar.markdown("### Minimum Value Thresholds")
-    color_list = ["Yellow", "Green", "Brown", "Blue", "Pink", "Black", "Baulk"]
+    color_list = list(threshold_values.keys())
     min_thresholds = {}
+    st.sidebar.header("Minimum Value Thresholds")
     for color in color_list:
         min_thresholds[color] = st.sidebar.slider(
             f"{color}",
@@ -58,8 +54,6 @@ if uploaded_file:
             value=threshold_values.get(color, 0.0),
             step=0.01
         )
-
-    tournaments = st.sidebar.multiselect("Select Tournaments", options=game_df["Tournament"].unique(), default=game_df["Tournament"].unique())
 
     # Player and time selection
     player_list = sorted(set(game_df["Player 1 Name"].dropna()).union(game_df["Player 2 Name"].dropna()))
@@ -90,9 +84,7 @@ if uploaded_file:
             date_range = st.date_input("Select Date Range", [game_df["Date"].min(), game_df["Date"].max()], key="date_range")
             start_date, end_date = pd.to_datetime(date_range[0]), pd.to_datetime(date_range[1])
 
-    # Filter logic
     filtered_df = game_df[
-        (game_df["Tournament"].isin(tournaments)) &
         (game_df["Date"] >= start_date) &
         (game_df["Date"] <= end_date)
     ]
@@ -104,9 +96,7 @@ if uploaded_file:
         player_games["Total Frames"] = pd.to_numeric(player_games["Total Frames"], errors='coerce').fillna(0)
         for col in color_cols:
             player_games[col] = pd.to_numeric(player_games[col], errors='coerce').fillna(0)
-
-        for col in color_cols:
-            player_games[col] = player_games[col] * player_games["Total Frames"]
+            player_games[col] *= player_games["Total Frames"]
 
         weighted_sums = player_games[color_cols].sum()
         total_frames = int(player_games["Total Frames"].sum())
@@ -122,29 +112,14 @@ if uploaded_file:
 
         return avg_colors, num_games, total_frames
 
-    color_mapping = {
-        "Yellow": "#FFFF00",
-        "Green": "#008000",
-        "Brown": "#8B4513",
-        "Blue": "#0000FF",
-        "Pink": "#FFC0CB",
-        "Black": "#000000",
-        "Baulk": "#7FFFD4"
-    }
-
     def create_chart(data, player_name, game_count, frame_count):
-        thresholds_df = pd.DataFrame({
-            "Ball": list(min_thresholds.keys()),
-            "Threshold": list(min_thresholds.values())
-        })
-
+        thresholds_df = pd.DataFrame({"Ball": list(min_thresholds.keys()), "Threshold": list(min_thresholds.values())})
         chart_data = data.merge(thresholds_df, on="Ball")
         chart_data["Percentage Diff"] = ((chart_data["Average Proportion"] - chart_data["Threshold"]) / chart_data["Threshold"]) * 100
         chart_data["Label"] = chart_data["Percentage Diff"].apply(lambda x: f"{x:+.1f}%")
         chart_data["Label Color"] = chart_data["Percentage Diff"].apply(lambda x: "green" if x >= 0 else "red")
         chart_data["Bar Color"] = chart_data.apply(
-            lambda row: "#D3D3D3" if row["Percentage Diff"] < 0 else color_mapping.get(row["Ball"], "#000000"),
-            axis=1
+            lambda row: "#D3D3D3" if row["Percentage Diff"] < 0 else color_mapping.get(row["Ball"], "#000000"), axis=1
         )
 
         base = alt.Chart(chart_data).encode(x=alt.X("Ball", sort=None))
@@ -180,10 +155,8 @@ if uploaded_file:
         url = "https://www.snooker.org/res/index.asp?template=2"
         response = requests.get(url)
         soup = BeautifulSoup(response.content, "html.parser")
-
         tournaments = []
         rows = soup.find_all("tr", class_="gradeA")
-
         for row in rows:
             name_cell = row.find("td", class_="name")
             date_cell = row.find("td", class_="date")
@@ -191,10 +164,7 @@ if uploaded_file:
                 event_name = name_cell.a.text.strip()
                 event_id = name_cell.a["href"].split("event=")[-1]
                 event_date = date_cell.text.strip() if date_cell else ""
-                tournaments.append({
-                    "label": f"{event_name} ({event_date})",
-                    "id": event_id
-                })
+                tournaments.append({"label": f"{event_name} ({event_date})", "id": event_id})
         return tournaments
 
     def get_upcoming_matchups_from_event(event_id, selected_round=None):
@@ -203,12 +173,10 @@ if uploaded_file:
             response = requests.get(url)
             soup = BeautifulSoup(response.content, 'html.parser')
             matchups = []
-
             for row in soup.find_all("tr", class_="oneonone"):
                 round_class = next((cls for cls in row.get("class", []) if cls.startswith("round")), None)
                 if selected_round and round_class != selected_round:
                     continue
-
                 players = row.find_all("td", class_="player")
                 if len(players) >= 2:
                     p1_tag = players[0].find("a")
@@ -231,41 +199,42 @@ if uploaded_file:
             [t["label"] for t in tournaments]
         )
         selected_event = next(t["id"] for t in tournaments if t["label"] == selected_label)
-
         round_options = [f"round{i}" for i in range(1, 11)]
         selected_round = st.sidebar.selectbox("Select Round (optional)", ["All"] + round_options)
         selected_round = None if selected_round == "All" else selected_round
 
         st.sidebar.markdown("### 🔍 Analyze Matchups")
         if st.sidebar.button("Fetch Matchups"):
+            one_year_df = game_df[(game_df["Date"] >= datetime.today() - timedelta(days=365))]
             matchups = get_upcoming_matchups_from_event(selected_event, selected_round)
-
-            if matchups:
-                st.markdown("## 📊 Upcoming Matchup Analysis")
-                for p1, p2 in matchups:
-                    match_p1 = fuzzy_match_name(p1, player_list)
-                    match_p2 = fuzzy_match_name(p2, player_list)
-
-                    if match_p1 and match_p2:
-                        stats_a, games_a, frames_a = get_player_stats(filtered_df, match_p1)
-                        stats_b, games_b, frames_b = get_player_stats(filtered_df, match_p2)
-
-                        st.markdown(f"### {match_p1} vs {match_p2}")
-                        col_m1, col_m2 = st.columns(2)
-                        with col_m1:
-                            st.altair_chart(create_chart(stats_a, match_p1, games_a, frames_a), use_container_width=True)
-                        with col_m2:
-                            st.altair_chart(create_chart(stats_b, match_p2, games_b, frames_b), use_container_width=True)
-                    else:
-                        st.warning(f"Could not confidently match: {p1} vs {p2}")
-            else:
-                st.info("No matchups found for this event.")
+            st.markdown("## ✅ Matchups with Positive Bias (Both Players)")
+            shown = False
+            for p1, p2 in matchups:
+                match_p1 = fuzzy_match_name(p1, player_list)
+                match_p2 = fuzzy_match_name(p2, player_list)
+                if match_p1 and match_p2:
+                    stats_a, _, _ = get_player_stats(one_year_df, match_p1)
+                    stats_b, _, _ = get_player_stats(one_year_df, match_p2)
+                    df_thresh = pd.DataFrame.from_dict(min_thresholds, orient="index", columns=["Threshold"]).reset_index().rename(columns={"index": "Ball"})
+                    merged_a = stats_a.merge(df_thresh, on="Ball")
+                    merged_b = stats_b.merge(df_thresh, on="Ball")
+                    a_bias = merged_a[merged_a["Average Proportion"] > merged_a["Threshold"]]["Ball"]
+                    b_bias = merged_b[merged_b["Average Proportion"] > merged_b["Threshold"]]["Ball"]
+                    common_positive = set(a_bias).intersection(set(b_bias))
+                    if common_positive:
+                        st.write(f"**{match_p1} vs {match_p2}** - Positive bias on: {', '.join(common_positive)}")
+                        shown = True
+            if not shown:
+                st.info("No matchups with both players showing positive bias on any color.")
     else:
         st.sidebar.warning("Could not load tournament list.")
 
     st.divider()
+    st.markdown("## 🔍 Individual Player Chart")
+    selected_player = st.selectbox("Choose a player to visualize", [player_a, player_b])
+    stats, games, frames = get_player_stats(filtered_df, selected_player)
+    st.altair_chart(create_chart(stats, selected_player, games, frames), use_container_width=True)
     st.file_uploader("Upload a new Excel file", type=["xlsx"], key="new_upload")
-
 else:
     uploaded_file = st.file_uploader("Upload the Excel file", type=["xlsx"], key="initial_upload")
     if uploaded_file:
